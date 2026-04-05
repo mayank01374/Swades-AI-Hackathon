@@ -17,6 +17,14 @@ Current deployment model:
 - PostgreSQL deployed on `Railway`
 - object storage is optional
 
+Current handoff status:
+
+- frontend deployment is working
+- backend deployment is working
+- Railway PostgreSQL is connected
+- the `chunks` table may need to be created manually on the target PostgreSQL instance before the API can start writing acknowledgments
+- after the table exists, the rest of the pipeline works as expected
+
 Default backend behavior:
 
 - if no object-storage environment variables are provided, uploaded chunks are stored locally on the backend filesystem
@@ -123,6 +131,12 @@ PORT=3000
 
 Leave all `S3_*` variables empty if you want local storage.
 
+Important:
+
+- PostgreSQL is deployed on Railway, but for the submission handoff the `chunks` table may need to be created manually if it has not already been pushed
+- if the table does not exist yet, `/api/chunks/upload`, `/api/chunks/summary`, and `/api/chunks/mismatches` will return `500`
+- create the table manually or run `npm run db:push` against the target database before testing the full pipeline
+
 ### Option B: Connect your own PostgreSQL database
 
 If you want to use your own database instead of Railway PostgreSQL:
@@ -145,6 +159,23 @@ DATABASE_POOL_MAX=30
 CORS_ORIGIN=https://your-vercel-domain
 LOCAL_STORAGE_DIR=./data/chunks
 PORT=3000
+```
+
+Manual SQL for a fresh PostgreSQL database:
+
+```sql
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
+CREATE TABLE IF NOT EXISTS chunks (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  chunk_id TEXT NOT NULL UNIQUE,
+  bucket_synced BOOLEAN NOT NULL DEFAULT FALSE,
+  db_acked BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS chunks_chunk_id_idx ON chunks (chunk_id);
+CREATE INDEX IF NOT EXISTS chunks_created_at_idx ON chunks (created_at);
 ```
 
 ### Option C: Connect object storage later
