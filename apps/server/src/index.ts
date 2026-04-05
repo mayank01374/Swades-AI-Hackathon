@@ -5,6 +5,7 @@ import { cors } from "hono/cors";
 import { logger } from "hono/logger";
 import { z } from "zod";
 
+import { getBucketDriver } from "./lib/bucket";
 import { findMissingChunkIds, getPipelineSummary, persistChunkAndAck } from "./lib/chunk-service";
 
 const app = new Hono();
@@ -50,6 +51,7 @@ app.use(
 );
 
 app.get("/", (c) => c.json({
+    bucketDriver: getBucketDriver(),
     ok: true,
     service: "reliable-recording-pipeline",
   }));

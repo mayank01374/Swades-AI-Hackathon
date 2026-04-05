@@ -1,119 +1,149 @@
 # Reliable Recording Chunking Pipeline
 
-An assignment for building a reliable chunking setup that ensures recording data stays accurate in all cases — no data loss, no silent failures.
+A hackathon project for building a durable chunking pipeline with browser-side OPFS buffering, backend acknowledgments, and storage/database reconciliation.
 
-## How It Works
+## Goal
 
-```
-Client (Browser)
-    │
-    ├── 1. Record & chunk data on the client side
-    ├── 2. Store chunks in OPFS (Origin Private File System)
-    ├── 3. Upload chunks to a storage bucket
-    ├── 4. On success → acknowledge (ack) to the database
-    │
-    └── Recovery: if DB has ack but chunk is missing from bucket
-        └── Re-send from OPFS → bucket
-```
+The system is designed to avoid silent failures and data loss:
 
-**Main objective:** In all cases, the recording data stays accurate. OPFS acts as the durable client-side buffer — chunks are only cleared after the bucket and DB are both confirmed in sync.
-
-### Flow Details
-
-1. **Client-side chunking** — Recording data is split into chunks in the browser
-2. **OPFS storage** — Each chunk is persisted to the Origin Private File System before any network call, so nothing is lost if the tab closes or the network drops
-3. **Bucket upload** — Chunks are uploaded to a storage bucket (can be a local bucket for testing, e.g. MinIO or a local S3-compatible store)
-4. **DB acknowledgment** — Once the bucket confirms receipt, an ack record is written to the database
-5. **Reconciliation** — If the DB shows an ack but the chunk is missing from the bucket (e.g. bucket purge, replication lag), the client re-uploads from OPFS to restore consistency
+1. The browser records and chunks data.
+2. Every chunk is written to OPFS before any upload.
+3. The backend stores the chunk.
+4. Only after storage succeeds does the backend write a PostgreSQL acknowledgment.
+5. The client can re-upload retained chunks if storage and DB drift out of sync.
 
 ## Tech Stack
 
-- **Next.js** — Frontend (App Router)
-- **Hono** — Backend API server
-- **Bun** — Runtime
-- **Drizzle ORM + PostgreSQL** — Database
-- **TailwindCSS + shadcn/ui** — UI
-- **Turborepo** — Monorepo build system
+- Next.js frontend in `apps/web`
+- Hono + Bun backend in `apps/server`
+- Drizzle ORM + PostgreSQL in `packages/db`
+- Turborepo monorepo
 
-## Getting Started
+## Storage Modes
+
+The backend supports two storage modes:
+
+- `Local storage fallback`
+  The default mode. If `S3_*` environment variables are not provided, uploaded chunks are stored on local disk.
+- `S3-compatible object storage`
+  If all required `S3_*` values are provided, the backend stores chunks in object storage such as MinIO, Cloudflare R2, or AWS S3.
+
+This makes the project hackathon-friendly: it works without external object storage, but can switch to real object storage later using environment variables only.
+
+## Local Setup
+
+Install dependencies:
 
 ```bash
 npm install
 ```
 
-### Environment Setup
+Copy environment files:
 
-1. Copy `apps/server/.env.example` to `apps/server/.env`.
-2. Copy `apps/web/.env.example` to `apps/web/.env.local`.
-3. Point the server env at your PostgreSQL instance and your S3-compatible bucket (MinIO works well for local development).
-4. Apply the schema:
+```bash
+cp apps/server/.env.example apps/server/.env
+cp apps/web/.env.example apps/web/.env.local
+```
+
+Configure the backend:
+
+- `DATABASE_URL` must point to PostgreSQL.
+- `LOCAL_STORAGE_DIR` controls where chunks are stored when object storage is not configured.
+- Leave `S3_*` values empty to use local disk storage.
+- Fill `S3_*` values to use object storage instead.
+
+Apply the schema:
 
 ```bash
 npm run db:push
 ```
 
-### Run Development
+Run development:
 
 ```bash
 npm run dev
 ```
 
-- Web app: [http://localhost:3001](http://localhost:3001)
-- API server: [http://localhost:3000](http://localhost:3000)
+Apps:
 
-### What The App Now Does
+- Web: `http://localhost:3001`
+- Server: `http://localhost:3000`
+
+## What The App Does
 
 - Records microphone audio in the browser with `MediaRecorder`
-- Persists every chunk into OPFS before attempting an upload
-- Uploads chunks to the Hono API as JSON payloads
-- Writes bucket objects first, then PostgreSQL acknowledgment rows
-- Retains acknowledged local copies for reconciliation repair
-- Periodically checks for DB rows missing from the bucket and re-uploads the missing chunks from OPFS
+- Persists every chunk into OPFS before upload
+- Uploads chunks to the backend API
+- Stores chunk data first, then writes PostgreSQL acknowledgments
+- Retains acknowledged OPFS copies for repair
+- Reconciles storage vs DB and re-uploads missing chunks from OPFS
+
+## Environment Variables
+
+### Frontend
+
+Required for `apps/web`:
+
+- `NEXT_PUBLIC_SERVER_URL`
+- `NEXT_PUBLIC_CHUNK_DURATION_MS`
+- `NEXT_PUBLIC_RECONCILIATION_INTERVAL_MS`
+- `NEXT_PUBLIC_RETRY_INTERVAL_MS`
+
+### Backend
+
+Required for `apps/server`:
+
+- `DATABASE_URL`
+- `DATABASE_POOL_MAX`
+- `CORS_ORIGIN`
+- `LOCAL_STORAGE_DIR`
+- `PORT`
+
+Optional for object storage:
+
+- `S3_BUCKET_NAME`
+- `S3_ENDPOINT`
+- `S3_REGION`
+- `S3_ACCESS_KEY_ID`
+- `S3_SECRET_ACCESS_KEY`
+- `S3_FORCE_PATH_STYLE`
+
+Backend behavior:
+
+- If `S3_*` values are present, object storage is used.
+- If `S3_*` values are missing, local disk storage is used automatically.
+
+## Deployment Notes
+
+### Frontend
+
+Deploy `apps/web` to Vercel.
+
+### Backend
+
+Deploy `apps/server` to any Bun-compatible host.
+
+For hackathon evaluation, the backend can run with:
+
+- PostgreSQL provided by organizers
+- local disk storage only
+
+Or, if organizers want, they can additionally connect:
+
+- Cloudflare R2
+- AWS S3
+- MinIO
+- any S3-compatible store
+
+After infrastructure is connected, run:
+
+```bash
+npm run db:push
+```
 
 ## Load Testing
 
-Target: **300,000 requests** to validate the chunking pipeline under heavy load.
-
-### Setup
-
-Use a load testing tool like [k6](https://k6.io), [autocannon](https://github.com/mcollina/autocannon), or [artillery](https://artillery.io) to simulate concurrent chunk uploads.
-
-Example with **k6**:
-
-```js
-import http from "k6/http";
-import { check } from "k6";
-
-export const options = {
-  scenarios: {
-    chunk_uploads: {
-      executor: "constant-arrival-rate",
-      rate: 5000,           // 5,000 req/s
-      timeUnit: "1s",
-      duration: "1m",       // → 300K requests in 60s
-      preAllocatedVUs: 500,
-      maxVUs: 1000,
-    },
-  },
-};
-
-export default function () {
-  const payload = JSON.stringify({
-    chunkId: `chunk-${__VU}-${__ITER}`,
-    data: "x".repeat(1024), // 1KB dummy chunk
-  });
-
-  const res = http.post("http://localhost:3000/api/chunks/upload", payload, {
-    headers: { "Content-Type": "application/json" },
-  });
-
-  check(res, {
-    "status 200": (r) => r.status === 200,
-  });
-}
-```
-
-Run:
+Example k6 run:
 
 ```bash
 k6 run apps/server/load-tests/chunk-upload.k6.js
@@ -125,35 +155,32 @@ Verify after the reconciliation loop settles:
 node apps/server/load-tests/verify-summary.mjs
 ```
 
-### What to Validate
+Validate:
 
-- **No data loss** — every ack in the DB has a matching chunk in the bucket
-- **OPFS recovery** — chunks survive client disconnects and can be re-uploaded
-- **Throughput** — server handles sustained 5K req/s without dropping chunks
-- **Consistency** — reconciliation catches and repairs any bucket/DB mismatches after the run
+- every DB acknowledgment has a matching chunk in the configured storage backend
+- OPFS recovery survives retry scenarios
+- reconciliation repairs storage/DB mismatches
+- the backend sustains target throughput for the test environment
 
 ## Project Structure
 
-```
-recoding-assignment/
-├── apps/
-│   ├── web/         # Frontend (Next.js) — chunking, OPFS, upload logic
-│   └── server/      # Backend API (Hono) — bucket upload, DB ack
-├── packages/
-│   ├── ui/          # Shared shadcn/ui components and styles
-│   ├── db/          # Drizzle ORM schema & queries
-│   ├── env/         # Type-safe environment config
-│   └── config/      # Shared TypeScript config
+```text
+apps/
+  web/        Next.js frontend
+  server/     Hono + Bun backend
+packages/
+  db/         Drizzle schema and DB client
+  env/        Shared environment validation
+  ui/         Shared UI components
+  config/     Shared TypeScript config
 ```
 
-## Available Scripts
+## Useful Scripts
 
-- `npm run dev` — Start all apps in development mode
-- `npm run build` — Build all apps
-- `npm run dev:web` — Start only the web app
-- `npm run dev:server` — Start only the server
-- `npm run check-types` — TypeScript type checking
-- `npm run db:push` — Push schema changes to database
-- `npm run db:generate` — Generate database client/types
-- `npm run db:migrate` — Run database migrations
-- `npm run db:studio` — Open database studio UI
+- `npm run dev`
+- `npm run build`
+- `npm run check-types`
+- `npm run db:push`
+- `npm run db:generate`
+- `npm run db:migrate`
+- `npm run db:studio`
