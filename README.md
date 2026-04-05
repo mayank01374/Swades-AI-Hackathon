@@ -41,11 +41,12 @@ Client (Browser)
 npm install
 ```
 
-### Database Setup
+### Environment Setup
 
-1. Make sure you have a PostgreSQL database set up.
-2. Update your `apps/server/.env` with your PostgreSQL connection details.
-3. Apply the schema:
+1. Copy `apps/server/.env.example` to `apps/server/.env`.
+2. Copy `apps/web/.env.example` to `apps/web/.env.local`.
+3. Point the server env at your PostgreSQL instance and your S3-compatible bucket (MinIO works well for local development).
+4. Apply the schema:
 
 ```bash
 npm run db:push
@@ -59,6 +60,15 @@ npm run dev
 
 - Web app: [http://localhost:3001](http://localhost:3001)
 - API server: [http://localhost:3000](http://localhost:3000)
+
+### What The App Now Does
+
+- Records microphone audio in the browser with `MediaRecorder`
+- Persists every chunk into OPFS before attempting an upload
+- Uploads chunks to the Hono API as JSON payloads
+- Writes bucket objects first, then PostgreSQL acknowledgment rows
+- Retains acknowledged local copies for reconciliation repair
+- Periodically checks for DB rows missing from the bucket and re-uploads the missing chunks from OPFS
 
 ## Load Testing
 
@@ -106,7 +116,13 @@ export default function () {
 Run:
 
 ```bash
-k6 run load-test.js
+k6 run apps/server/load-tests/chunk-upload.k6.js
+```
+
+Verify after the reconciliation loop settles:
+
+```bash
+node apps/server/load-tests/verify-summary.mjs
 ```
 
 ### What to Validate

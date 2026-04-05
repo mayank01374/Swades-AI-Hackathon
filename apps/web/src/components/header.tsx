@@ -1,21 +1,30 @@
 "use client";
+
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 
 import { ModeToggle } from "./mode-toggle";
 
 export default function Header() {
+  const pathname = usePathname();
   const links = [
-    { to: "/", label: "Home" },
-    { to: "/recorder", label: "Recorder" },
+    { label: "Overview", to: "/" },
+    { label: "Pipeline", to: "/recorder" },
   ] as const;
 
   return (
-    <div>
-      <div className="flex flex-row items-center justify-between px-2 py-1">
-        <nav className="flex gap-4 text-lg">
+    <header className="border-b border-border/60 bg-background/85 backdrop-blur">
+      <div className="mx-auto flex max-w-7xl flex-row items-center justify-between px-4 py-3 md:px-6">
+        <nav className="flex gap-2 text-sm">
           {links.map(({ to, label }) => {
+            const isActive = pathname === to;
+
             return (
-              <Link key={to} href={to}>
+              <Link
+                key={to}
+                href={to}
+                className={`px-3 py-2 transition-colors ${isActive ? "bg-foreground text-background" : "text-muted-foreground hover:text-foreground"}`}
+              >
                 {label}
               </Link>
             );
@@ -25,7 +34,6 @@ export default function Header() {
           <ModeToggle />
         </div>
       </div>
-      <hr />
-    </div>
+    </header>
   );
 }

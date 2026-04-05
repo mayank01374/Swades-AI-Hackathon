@@ -1,0 +1,4 @@
+apps/server/.env
+apps/web/.env.local
+.next
+node_modules
